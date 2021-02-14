@@ -1,60 +1,119 @@
-
+const express = require('express');
+const bodyParser = require('body-parser');
+const MongoClient = require('mongodb').MongoClient;
+const bson = require('bson');
 require('dotenv').config();
-var express = require("express");
-const bodyParser = require("body-parser");
-var User = require("./models/User");
 
-var app = express();
-var mongoose = require('mongoose').set('debug', true);
+const PORT = process.env.EXPRESS_PORT;
 
-var  devurl = `mongodb+srv://monica17:${process.env.MONGO_PASSWORD}@cluster0.5livy.mongodb.net/todoWeekfour?retryWrites=true&w=majority`;
+const app = express();
+app.use(bodyParser.urlencoded({ extended: true, }));
+app.use(bodyParser.json())
 
-var mongodb = process.env.MONGODB_URI || devurl;
+const connectionString = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@${process.env.MONGO_CLUSTER_URL}/${process.env.MONGO_DATABASE}?retryWrites=true&w=majority`;
 
-mongoose.connect(mongodb, {useNewUrlParser: true,  useCreateIndex: true, useUnifiedTopology: true});
-mongoose.Promise = global.Promise;
- var db = mongoose.connection;
-db.on("error", console.error.bind(console, "Connection error: "));
+MongoClient.connect(connectionString, { useUnifiedTopology: true, }).then((client) => {
+	console.log('Connected to Mongo Atlas');
+	const db = client.db(process.env.MONGO_DATABASE);
+	const todos = db.collection('weddingtodos');
 
+	
+	app.get('/', (req, res) => {
+		res.send('REST API testing!');
+	});
 
+	
+	app.get('/weddingtodos', (req, res) => {
+		todos.find().toArray().then((results) => {
+			res.status(200).send(results);
+		}).catch((error) => {
+			console.error('Get weddingtodos error: ', error);
+			res.status(400).send(error);
+		});
+	});
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({extended: false}));
-app.get('/allusers', async (req,res) =>{
-     try{
-          const users = await User.find({});
-          if(users)  res.send(users);
+	
+	app.get('/weddingtodos/:id', (req, res) => {
+		let objectId = bson.ObjectID(req.params.id);
 
-     }catch(error){
-          //console.log(error);
-          res.status(500).json({message: error.message});
-           }
-});
-app.get('/users', async(req,res)=>{
-     try{
-         const users = await User.find( { birthday :{$lt: ("2010-01-01")}});
-          if(users)    res.status(200).send(users);
-     }catch(error){
-          res.status(400).send(error);
-          }
-                                                       
-  });                   
-          
+		todos.findOne(
+			{ _id: { $eq: objectId }, }
+		).then((result) => {
+			if (result) {
+				res.status(200).send(result);
+			} else {
+				res.status(404).send('This wedding todo do not exists.');
+			}
+		}).catch((error) => {
+			console.error('Get 1 error: ', error);
+			res.status(400).send(error);
+		});
+	});
 
-app.get('/:id', async(req,res)=>{
-     try{
-          const user = await User.findById(req.params.id);
-          if(user) res.send(user);
-     }catch(error){
-          console.log(error);
-          res.status(500).json({message: error.message});
-           }
+	
+	app.post('/weddingtodos', (req, res) => {
+		todos.insertOne(req.body)
+			.then((result) => {
+				if (result.insertedCount >= 0) {
+					res.status(201).send(result.ops);
+				} else {
+					res.status(500).send('Your wedding todo could not be created.');
+				}
+			}).catch((error) => {
+				console.error('Create error; ', error);
+				res.status(400).send(error);
+			});
+	});
 
-});
+	
+	app.put('/weddingtodos/:id', (req, res) => {
+		let objectId = bson.ObjectID(req.params.id);
 
+		todos.findOneAndUpdate(
+			{ _id: { $eq: objectId, }, },
+			{
+				$set: {
+					title: req.body.title,
+					description: req.body.description,
+					actionby: req.body.actionby,
+					dueByDate: req.body.dueByDate,
+					status: req.body.status,
+					option: req.body.option
+				},
+			},
+			{
+				upsert: true
+			}
+		).then((result) => {
+			if (result.ok) {
+				res.status(200).send(req.body);
+			} else {
+				res.status(400).send('Your wedding todo update failed.');
+			}
+		}).catch((error) => {
+			console.error('Update error; ', error);
+			res.status(400).send(error);
+		});
+	});
 
-var port = 3000;
+	
+	app.delete('/weddingtodos/:id', (req, res) => {
+		let objectId = bson.ObjectID(req.params.id);
 
-app.listen(port,function(){
-     console.log(`Node server running on ${port}`);
+		todos.findOneAndDelete(
+			{ _id: { $eq: objectId, }, },
+		).then((result) => {
+			if (result.ok) res.status(200).send('Wedding todo was successfully deleted.');
+		}).catch((error) => {
+			console.error('Delete error; ', error);
+			res.status(400).send(error);
+		});
+	});
+
+	// LISTEN
+	app.listen(PORT, () => {
+		console.log(`App is listening on PORT ${PORT}`);
+	});
+}).catch((error) => {
+	console.error('Connection error: ', error);
 });
